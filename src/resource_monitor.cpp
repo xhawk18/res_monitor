@@ -5,10 +5,10 @@
 
 double ResourceMonitor::get_cpu_usage() {
     // ... existing code (CPU使用率计算逻辑) ...
-    return usage;
+    return 0;
 }
 
 double ResourceMonitor::get_memory_usage() {
     // ... existing code (内存使用率计算逻辑) ...
-    return usage;
+    return 0;
 }
