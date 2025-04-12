@@ -17,9 +17,17 @@ int main() {
     while(true) {
         auto cpuUsage = monitor.getCpuUsage();
         auto memUsage = monitor.getMemoryUsage();
-        auto diskUsage = monitor.getDiskUsage();
+        auto diskIo = monitor.getDiskIo();
         
-        logger.info("{}, {}, {}", cpuUsage, memUsage, diskUsage);
+        logger.info("{}, {}, {}", cpuUsage, memUsage, diskIo);
+
+        std::vector<std::string> topCPUs;
+        std::vector<std::string> topMemories;
+        std::vector<std::string> topDiskIos;
+        monitor.getTopProcesses(3, topCPUs, topMemories, topDiskIos);
+        for(const auto& process : topCPUs) {
+            logger.info("Top CPU Process: {}", process);
+        }
         
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
