@@ -1,8 +1,17 @@
 #pragma once
 #include <string>
+#include <memory>
 
 class ResourceMonitor {
 public:
-    static double get_cpu_usage();
-    static double get_memory_usage();
+    ResourceMonitor();
+    ~ResourceMonitor();
+
+    std::string getCpuUsage();
+    std::string getMemoryUsage();
+    std::string getDiskUsage();
+    
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };

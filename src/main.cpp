@@ -13,14 +13,15 @@ int main() {
     spdlog::logger logger("multi_sink", {console_sink, file_sink});
     logger.set_level(spdlog::level::info);
 
+    ResourceMonitor monitor;
     while(true) {
-        double cpu_usage = ResourceMonitor::get_cpu_usage();
-        double mem_usage = ResourceMonitor::get_memory_usage();
+        auto cpuUsage = monitor.getCpuUsage();
+        auto memUsage = monitor.getMemoryUsage();
+        auto diskUsage = monitor.getDiskUsage();
         
-        logger.info("CPU Usage: {:.2f}%", cpu_usage);
-        logger.info("Memory Usage: {:.2f}%", mem_usage);
+        logger.info("{}, {}, {}", cpuUsage, memUsage, diskUsage);
         
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     return 0;
