@@ -1,5 +1,5 @@
 #include "resource_monitor.h"
-#include <docopt/docopt.h>
+#include <docopt.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -9,6 +9,9 @@
 #include <filesystem>
 #include <csignal>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
+#include <iostream>
 
 namespace fs = std::filesystem;
 
@@ -24,36 +27,20 @@ void signalHandler(int signum) {
 static const char USAGE[] =
 R"(资源监控工具
 
-用法:
-  res_monitor [-i <interval>] [-mc <min_cpu>] [-mm <min_mem>] [-md <min_disk>]
+Usage:
+  res_monitor [-i <interval>] [-c <min_cpu>] [-m <min_mem>] [-d <min_disk>] [-n <num_processes>]
   res_monitor (-h | --help)
 
-选项:
-  -i <interval>  更新间隔(秒) [默认: 10]
-  -mc <min_cpu>  最小CPU使用率(%) [默认: 1]
-  -mm <min_mem>  最小内存使用量(MB) [默认: 1]
-  -md <min_disk> 最小磁盘IO(KB) [默认: 1]
-  -h --help      显示帮助信息
+Options:
+  -i <interval>       更新间隔(秒) [默认: 10]
+  -c <min_cpu>        最小CPU使用率(%) [默认: 1]
+  -m <min_mem>        最小内存使用量(MB) [默认: 1]
+  -d <min_disk>       最小磁盘IO(KB/s) [默认: 1]
+  -n <num_processes>  显示进程数 [默认: 3]
+  -h --help           显示帮助信息
 )";
 
 int main(int argc, char** argv) {
-    auto args = docopt::docopt(USAGE, {argv + 1, argv + argc}, true);
-
-    int interval = 10;
-    double minCpu = 1.0;
-    uint64_t minMem = 1024 * 1024; // 1MB
-    uint64_t minDisk = 1024; // 1KB
-
-    try {
-        interval = std::stoi(args["-i"].asString());
-        minCpu = std::stod(args["-mc"].asString());
-        minMem = std::stoull(args["-mm"].asString()) * 1024 * 1024;
-        minDisk = std::stoull(args["-md"].asString()) * 1024;
-    } catch (...) {
-        spdlog::error("参数解析错误");
-        return 1;
-    }
-
     // 注册信号处理
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
@@ -77,6 +64,43 @@ int main(int argc, char** argv) {
     spdlog::logger logger("multi_sink", {console_sink, rotating_sink});
     logger.set_level(spdlog::level::info);
 
+    // 解析命令行参数 
+    auto args = docopt::docopt(USAGE, {argv + 1, argv + argc}, true);
+
+    uint64_t interval = 10; // 10s
+    uint64_t minCpu = 1;    // 1%
+    uint64_t minMem = 1;    // 1MB
+    uint64_t minDisk = 1;   // 1KB
+    uint64_t numProcesses = 3;  // 3
+    
+    auto getArg = [&args](const std::string& key, uint64_t *result) {
+        const auto &value = args[key];
+        if (value.isLong()) {
+            *result = value.asLong();
+        }
+        else if(value.isString()) {
+            *result = std::stoull(value.asString());
+        }
+    };
+
+    try {
+        getArg("-i", &interval);
+        getArg("-c", &minCpu);
+        getArg("-m", &minMem);
+        getArg("-d", &minDisk);
+        getArg("-n", &numProcesses);
+    } catch (const std::exception& e) {
+        logger.error("参数解析错误: {}", e.what());
+        return 1;
+    }
+
+    logger.info("interval: {}sec, minCpu: {}%, minMem: {}M, minDisk: {}k, numProcesses: {}",
+        interval,
+        minCpu,
+        minMem,
+        minDisk,
+        numProcesses);
+
     ResourceMonitor monitor;
     while(!g_stopping) {
         auto cpuUsage = monitor.getCpuUsage();
@@ -85,9 +109,9 @@ int main(int argc, char** argv) {
         
         logger.info("{}, {}, {}", cpuUsage, memUsage, diskIo);
 
-        auto topCPUs = monitor.getTopCpuProcesses(3, minCpu);
-        auto topMemories = monitor.getTopMemProcesses(3, minMem);
-        auto topDiskIos = monitor.getTopDiskProcesses(3, minDisk);
+        auto topCPUs = monitor.getTopCpuProcesses(numProcesses, minCpu/100.0);
+        auto topMemories = monitor.getTopMemProcesses(numProcesses, minMem*1024*1024);
+        auto topDiskIos = monitor.getTopDiskProcesses(numProcesses, minDisk*1024);
         
         for(const auto& process : topCPUs) {
             logger.info("{}", process);
