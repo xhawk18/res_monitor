@@ -16,7 +16,7 @@ struct OnScopeExit {
     ~OnScopeExit() { func_(); }
 };
 
-std::string valueToHumanReadable(uint64_t value) {
+std::string valueToHumanReadable(auto value) {
     if (value >= (uint64_t)1024 * 1024 * 1024 * 1024) {
         return fmt::format("{:.2f} TB", value / 1024.0 / 1024.0 / 1024.0 / 1024.0);
     }
@@ -50,7 +50,7 @@ struct ResourceMonitor::Impl {
 
     // 磁盘
     std::map<std::string, uint64_t> diskIoTime_;
-    std::optional<std::chrono::system_clock::time_point> diskIoUpdateTime_;
+    std::optional<std::chrono::steady_clock::time_point> diskIoUpdateTime_;
 
     // 进程CPU占用
     struct ProcessTime {
@@ -66,6 +66,7 @@ struct ResourceMonitor::Impl {
         uint64_t readIo_;
         uint64_t writeIo_;
     };
+    std::optional<std::chrono::steady_clock::time_point> processIoUpdateTime_;
     std::map<int, ProcessIo> processIos_;
 
 };
@@ -180,7 +181,7 @@ std::string ResourceMonitor::getDiskIo() {
     std::string line;
     std::map<std::string, uint64_t> diskIoTime;
 
-    auto now = std::chrono::system_clock::now();
+    auto now = std::chrono::steady_clock::now();
     while (std::getline(proc_diskstats, line)) {
         std::istringstream iss(line);
         unsigned major, minor;
@@ -381,6 +382,7 @@ std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses, 
     std::vector<std::string> topDiskIos;
 
     // 添加磁盘IO统计  
+    auto now = std::chrono::steady_clock::now();
     std::map<int, Impl::ProcessIo> processIos;
     for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
         try {
@@ -416,8 +418,13 @@ std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses, 
     }
 
     OnScopeExit onScopeExit([&]() {
+        impl_->processIoUpdateTime_ = now;
         impl_->processIos_ = std::move(processIos);
-    });    
+    });
+    
+    if(!impl_->processIoUpdateTime_.has_value()) {
+        return topDiskIos;
+    }
 
     // 计算间隔时间内的磁盘IO总量 
     struct IoData {
@@ -459,13 +466,19 @@ std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses, 
         auto deltaReadBytes = it->second.readBytes_;
         auto deltaWriteBytes = it->second.writeBytes_;
         auto totalIO = it->first;
-        if(totalIO < minDiskUsage) continue;
+
+        auto periodMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - impl_->processIoUpdateTime_.value()).count();
+        auto readSpeed = deltaReadBytes * 1000.0 / periodMs;
+        auto writeSpeed = deltaWriteBytes * 1000.0 / periodMs;
+        auto totalSpeed = readSpeed + writeSpeed;
+
+        if(totalSpeed < minDiskUsage) continue;
 
         auto cmdline = getCmdLine(pid);
         
-        topDiskIos.emplace_back(fmt::format("DISK: {}+{}, CMD: [{}]{}",
-            valueToHumanReadable(deltaReadBytes),
-            valueToHumanReadable(deltaWriteBytes),
+        topDiskIos.emplace_back(fmt::format("DISK: {}/s+{}/s, CMD: [{}]{}",
+            valueToHumanReadable(readSpeed),
+            valueToHumanReadable(writeSpeed),
             pid,
             cmdline));
     }
