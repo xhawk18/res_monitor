@@ -52,13 +52,22 @@ struct ResourceMonitor::Impl {
     std::map<std::string, uint64_t> diskIoTime_;
     std::optional<std::chrono::system_clock::time_point> diskIoUpdateTime_;
 
-    // 进程
-    struct Process {
+    // 进程CPU占用
+    struct ProcessTime {
         int pid_;
         uint64_t totalTime_;
     };
-    std::optional<uint64_t> prevCpuTime_;   // 和prevTotal_相同  
-    std::map<int, Process> processes_;
+    std::optional<uint64_t> prevCpuTime_;   // 和prevTotal_略微相同  
+    std::map<int, ProcessTime> processTimes_;
+
+    // 进程IO占用
+    struct ProcessIo {
+        int pid_;
+        uint64_t readIo_;
+        uint64_t writeIo_;
+    };
+    std::map<int, ProcessIo> processIos_;
+
 };
 
 ResourceMonitor::ResourceMonitor()
@@ -224,7 +233,7 @@ std::string ResourceMonitor::getDiskIo() {
     return result;
 }
 
-std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses) {
+std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses, double minCpuUsage) {
     std::vector<std::string> topCPUs;
     auto readCPUTotal = []() -> uint64_t {
         std::ifstream file("/proc/stat");
@@ -245,7 +254,7 @@ std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses) {
         return sum;
     };
 
-    std::map<int, Impl::Process> processes;
+    std::map<int, Impl::ProcessTime> processTimes;
 
     // 遍历/proc目录获取所有进程
     for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
@@ -274,7 +283,7 @@ std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses) {
 
                         uint64_t totalTime = utime + stime;
                         
-                        processes[pid] = {
+                        processTimes[pid] = {
                             pid,
                             totalTime
                         };
@@ -290,7 +299,7 @@ std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses) {
 
     OnScopeExit onScopeExit([&]() {
         impl_->prevCpuTime_ = cpuTime;
-        impl_->processes_ = std::move(processes);
+        impl_->processTimes_ = std::move(processTimes);
     });
 
     if(!impl_->prevCpuTime_.has_value()) {
@@ -298,10 +307,10 @@ std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses) {
     }
 
     // 计算CPU使用率
-    std::map<uint64_t, int> topCPUMap;  // key: deltaTotalTime, value: pid
-    for(auto &process: processes) {
-        auto prev = impl_->processes_.find(process.first);
-        if(prev != impl_->processes_.end()) {
+    std::multimap<uint64_t, int> topCPUMap;  // key: deltaTotalTime, value: pid
+    for(auto &process: processTimes) {
+        auto prev = impl_->processTimes_.find(process.first);
+        if(prev != impl_->processTimes_.end()) {
             auto prevTotalTime = prev->second.totalTime_;
             auto deltaTotalTime = process.second.totalTime_ - prevTotalTime;
             topCPUMap.emplace(deltaTotalTime, process.first);
@@ -312,21 +321,24 @@ std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses) {
     auto deltaCpuTime = cpuTime - impl_->prevCpuTime_.value();
     int n = 0;
     for(auto it = topCPUMap.rbegin(); it != topCPUMap.rend() && n < numProcesses; ++it, ++n) {
-        double cpuUsage = 100.0 * it->first / deltaCpuTime;
+        double cpuUsage = it->first / (double)deltaCpuTime;
+        //std::cout << "it->first: " << it->first << " deltaCpuTime: " << deltaCpuTime << std::endl;
+        if(cpuUsage < minCpuUsage) continue;
+
         auto pid = it->second;
         auto cmdline = getCmdLine(pid);
-        topCPUs.emplace_back(fmt::format("PID: {}, CPU: {:.2f}%, CMD: {}", pid, cpuUsage, cmdline));
+        topCPUs.emplace_back(fmt::format("PID: {}, CPU: {:.2f}%, CMD: {}", pid, cpuUsage*100, cmdline));
     }
 
     return topCPUs;
 }
 
 
-std::vector<std::string> ResourceMonitor::getTopMemProcesses(int numProcesses) {
+std::vector<std::string> ResourceMonitor::getTopMemProcesses(int numProcesses, uint64_t minMemUsage) {
     std::vector<std::string> topMemories;
 
     // 添加内存统计
-    std::map<uint64_t, int> memoryMap;  // key: 内存大小(字节), value: pid
+    std::multimap<uint64_t, int> memoryMap;  // key: 内存大小(字节), value: pid
     for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
         try {
             std::string pidStr = entry.path().filename();
@@ -355,6 +367,8 @@ std::vector<std::string> ResourceMonitor::getTopMemProcesses(int numProcesses) {
         auto pid = it->second;
         auto cmdline = getCmdLine(pid);
         auto memorySize = it->first;
+        if(memorySize < minMemUsage) continue;
+
         topMemories.emplace_back(fmt::format("PID: {}, MEM: {}, CMD: {}", 
             pid, valueToHumanReadable(memorySize), cmdline));
     }
@@ -362,12 +376,12 @@ std::vector<std::string> ResourceMonitor::getTopMemProcesses(int numProcesses) {
     return topMemories;
 }
 
-std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses) {
+std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses, uint64_t minDiskUsage) {
     //std::vector<std::string> &topMemories,
     std::vector<std::string> topDiskIos;
 
-    // 添加磁盘IO统计
-    std::map<uint64_t, int> ioMap;  // key: IO读写总量(字节), value: pid
+    // 添加磁盘IO统计  
+    std::map<int, Impl::ProcessIo> processIos;
     for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
         try {
             std::string pidStr = entry.path().filename();
@@ -377,7 +391,8 @@ std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses) 
                 // 读取/proc/[pid]/io获取IO信息
                 std::ifstream ioFile(entry.path() / "io");
                 if (ioFile) {
-                    uint64_t readBytes = 0, writeBytes = 0;
+                    uint64_t readBytes = 0;
+                    uint64_t writeBytes = 0;
                     std::string line;
                     
                     while (std::getline(ioFile, line)) {
@@ -387,11 +402,12 @@ std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses) 
                             writeBytes = std::stoull(line.substr(12));
                         }
                     }
-                    
-                    uint64_t totalIO = readBytes + writeBytes;
-                    if (totalIO > 0) {
-                        ioMap.emplace(totalIO, pid);
-                    }
+
+                    processIos[pid] = {
+                        pid,
+                        readBytes,
+                        writeBytes
+                    };
                 }
             }
         } catch (...) {
@@ -399,14 +415,59 @@ std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses) 
         }
     }
 
+    OnScopeExit onScopeExit([&]() {
+        impl_->processIos_ = std::move(processIos);
+    });    
+
+    // 计算间隔时间内的磁盘IO总量 
+    struct IoData {
+        int pid_;
+        uint64_t readBytes_;
+        uint64_t writeBytes_;
+    };
+    std::multimap<uint64_t, IoData> ioMap;  // key: IO读写总量(字节), value: pid
+
+    //std::cout << "processIos = " << processIos.size() << "\n";
+    for(auto &process: processIos) {
+        
+        auto prev = impl_->processIos_.find(process.first);
+        if(prev != impl_->processIos_.end()) {
+            //std::cout << "pid = " << process.first << "\n";
+            auto prevReadBytes = prev->second.readIo_;
+            auto prevWriteBytes = prev->second.writeIo_;
+            auto readBytes = process.second.readIo_;
+            auto writeBytes = process.second.writeIo_;
+            auto deltaReadBytes = readBytes - prevReadBytes;
+            auto deltaWriteBytes = writeBytes - prevWriteBytes;
+            uint64_t totalIO = deltaReadBytes + deltaWriteBytes;
+            //if (totalIO > 0) 
+            {
+                ioMap.emplace(totalIO, IoData{
+                    process.first,
+                    deltaReadBytes,
+                    deltaWriteBytes
+                });
+            }
+        }
+    }
+    //std::cout << "ioMap = " << ioMap.size() << "\n";
+
     // 获取磁盘IO最高的进程
     int n = 0;
     for (auto it = ioMap.rbegin(); it != ioMap.rend() && n < numProcesses; ++it, ++n) {
-        auto pid = it->second;
+        auto pid = it->second.pid_;
+        auto deltaReadBytes = it->second.readBytes_;
+        auto deltaWriteBytes = it->second.writeBytes_;
+        auto totalIO = it->first;
+        if(totalIO < minDiskUsage) continue;
+
         auto cmdline = getCmdLine(pid);
-        auto ioSize = it->first;
-        topDiskIos.emplace_back(fmt::format("PID: {}, IO: {}, CMD: {}",
-            pid, valueToHumanReadable(ioSize), cmdline));
+        
+        topDiskIos.emplace_back(fmt::format("PID: {}, IO: {}+{}, CMD: {}",
+            pid,
+            valueToHumanReadable(deltaReadBytes),
+            valueToHumanReadable(deltaWriteBytes),
+            cmdline));
     }
 
     return topDiskIos;
