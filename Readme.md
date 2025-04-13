@@ -1,7 +1,9 @@
-# Resource Monitor
+# Resource Monitor [中文版本这里](Readme_cn.md)
 
 ## Overview
-A system resource monitoring tool for linux that displays real-time CPU, memory and disk usage, and lists processes with highest resource consumption.
+A Linux system resource monitoring tool that displays real-time CPU, memory and disk usage, and lists processes with highest resource consumption.
+
+This tool helps identify system bottlenecks by analyzing logged data when encountering high system load or performance issues.
 
 ## Key Features
 - ✅ Real-time CPU usage monitoring
