@@ -16,6 +16,24 @@ struct OnScopeExit {
     ~OnScopeExit() { func_(); }
 };
 
+std::string valueToHumanReadable(uint64_t value) {
+    if (value >= (uint64_t)1024 * 1024 * 1024 * 1024) {
+        return fmt::format("{:.2f} TB", value / 1024.0 / 1024.0 / 1024.0 / 1024.0);
+    }
+    else if (value >= (uint64_t)1024 * 1024 * 1024) {
+        return fmt::format("{:.2f} GB", value / 1024.0 / 1024.0 / 1024.0);
+    }
+    else if (value >= (uint64_t)1024 * 1024) {
+        return fmt::format("{:.2f} MB", value / 1024.0 / 1024.0);
+    }
+    else if (value >= (uint64_t)1024) {
+        return fmt::format("{:.2f} kB", value / 1024.0);
+    }
+    else {
+        return fmt::format("{}B", value);
+    }
+}
+
 struct ResourceMonitor::Impl {
     // CPU
     std::optional<uint64_t> prevTotal_;
@@ -87,24 +105,6 @@ std::string ResourceMonitor::getMemoryUsage() {
         if (unit == "GB") return value * 1024 * 1024 * 1024;
         if (unit == "TB") return value * 1024 * 1024 * 1024 * 1024;
         return value;  // 默认按字节处理
-    };
-
-    auto valueToHumanReadable = [](uint64_t value) -> std::string {
-        if (value >= (uint64_t)1024 * 1024 * 1024 * 1024) {
-            return fmt::format("{:.2f} TB", value / 1024.0 / 1024.0 / 1024.0 / 1024.0);
-        }
-        else if (value >= (uint64_t)1024 * 1024 * 1024) {
-            return fmt::format("{:.2f} GB", value / 1024.0 / 1024.0 / 1024.0);
-        }
-        else if (value >= (uint64_t)1024 * 1024) {
-            return fmt::format("{:.2f} MB", value / 1024.0 / 1024.0);
-        }
-        else if (value >= (uint64_t)1024) {
-            return fmt::format("{:.2f} kB", value / 1024.0);
-        }
-        else {
-            return fmt::format("{}B", value);
-        }
     };
 
     while (std::getline(proc_meminfo, line)) {
@@ -315,11 +315,46 @@ void ResourceMonitor::getTopProcesses(
 
     // 排序并获取前numProcesses个进程
     auto deltaCpuTime = cpuTime - impl_->prevCpuTime_.value();
-    for(auto it = topCPUMap.rbegin(); it != topCPUMap.rend() && numProcesses-- > 0; ++it) {
+    int n = 0;
+    for(auto it = topCPUMap.rbegin(); it != topCPUMap.rend() && n < numProcesses; ++it, ++n) {
         double cpuUsage = 100.0 * it->first / deltaCpuTime;
         auto pid = it->second;
         auto cmdline = getCmdLine(pid);
         topCPUs.emplace_back(fmt::format("PID: {}, CPU: {:.2f}%, CMD: {}", pid, cpuUsage, cmdline));
+    }
+
+    // 添加内存统计
+    std::map<uint64_t, int> memoryMap;  // key: 内存大小(字节), value: pid
+    for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
+        try {
+            std::string pidStr = entry.path().filename();
+            if (std::all_of(pidStr.begin(), pidStr.end(), ::isdigit)) {
+                int pid = std::stoi(pidStr);
+                
+                // 读取/proc/[pid]/statm获取内存信息
+                std::ifstream statmFile(entry.path() / "statm");
+                if (statmFile) {
+                    uint64_t size, resident, shared, text, lib, data, dt;
+                    statmFile >> size >> resident >> shared >> text >> lib >> data >> dt;
+                    
+                    // resident是实际驻留内存大小(页数)
+                    uint64_t rss = resident * sysconf(_SC_PAGESIZE); // 转换为字节
+                    memoryMap.emplace(rss, pid);
+                }
+            }
+        } catch (...) {
+            continue;
+        }
+    }
+
+    // 获取内存占用最高的进程  
+    n = 0;
+    for (auto it = memoryMap.rbegin(); it != memoryMap.rend() && n < numProcesses; ++it, ++n) {
+        auto pid = it->second;
+        auto cmdline = getCmdLine(pid);
+        auto memorySize = it->first;
+        topMemories.emplace_back(fmt::format("PID: {}, MEM: {}, CMD: {}", 
+            pid, valueToHumanReadable(memorySize), cmdline));
     }
 
 }

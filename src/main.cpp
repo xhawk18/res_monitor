@@ -25,11 +25,16 @@ int main() {
         std::vector<std::string> topMemories;
         std::vector<std::string> topDiskIos;
         monitor.getTopProcesses(3, topCPUs, topMemories, topDiskIos);
+        
         for(const auto& process : topCPUs) {
             logger.info("Top CPU Process: {}", process);
         }
+
+        for(const auto& process : topMemories) {
+            logger.info("Top MEM Process: {}", process);
+        }
         
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 
     return 0;
