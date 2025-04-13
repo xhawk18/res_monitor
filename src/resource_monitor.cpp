@@ -327,7 +327,7 @@ std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses, d
 
         auto pid = it->second;
         auto cmdline = getCmdLine(pid);
-        topCPUs.emplace_back(fmt::format("PID: {}, CPU: {:.2f}%, CMD: {}", pid, cpuUsage*100, cmdline));
+        topCPUs.emplace_back(fmt::format("CPU: {:.2f}%, CMD: [{}]{}", cpuUsage*100, pid, cmdline));
     }
 
     return topCPUs;
@@ -369,8 +369,8 @@ std::vector<std::string> ResourceMonitor::getTopMemProcesses(int numProcesses, u
         auto memorySize = it->first;
         if(memorySize < minMemUsage) continue;
 
-        topMemories.emplace_back(fmt::format("PID: {}, MEM: {}, CMD: {}", 
-            pid, valueToHumanReadable(memorySize), cmdline));
+        topMemories.emplace_back(fmt::format("MEM: {}, CMD: [{}]{}", 
+            pid, valueToHumanReadable(memorySize), pid, cmdline));
     }
 
     return topMemories;
@@ -463,10 +463,10 @@ std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses, 
 
         auto cmdline = getCmdLine(pid);
         
-        topDiskIos.emplace_back(fmt::format("PID: {}, IO: {}+{}, CMD: {}",
-            pid,
+        topDiskIos.emplace_back(fmt::format("IO: {}+{}, CMD: [{}]{}",
             valueToHumanReadable(deltaReadBytes),
             valueToHumanReadable(deltaWriteBytes),
+            pid,
             cmdline));
     }
 
