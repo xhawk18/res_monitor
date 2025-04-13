@@ -1,4 +1,5 @@
 #include "resource_monitor.h"
+#include <docopt/docopt.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -20,7 +21,39 @@ void signalHandler(int signum) {
     g_cv.notify_all();  // 唤醒所有等待的线程
 }
 
-int main() {
+static const char USAGE[] =
+R"(资源监控工具
+
+用法:
+  res_monitor [-i <interval>] [-mc <min_cpu>] [-mm <min_mem>] [-md <min_disk>]
+  res_monitor (-h | --help)
+
+选项:
+  -i <interval>  更新间隔(秒) [默认: 10]
+  -mc <min_cpu>  最小CPU使用率(%) [默认: 1]
+  -mm <min_mem>  最小内存使用量(MB) [默认: 1]
+  -md <min_disk> 最小磁盘IO(KB) [默认: 1]
+  -h --help      显示帮助信息
+)";
+
+int main(int argc, char** argv) {
+    auto args = docopt::docopt(USAGE, {argv + 1, argv + argc}, true);
+
+    int interval = 10;
+    double minCpu = 1.0;
+    uint64_t minMem = 1024 * 1024; // 1MB
+    uint64_t minDisk = 1024; // 1KB
+
+    try {
+        interval = std::stoi(args["-i"].asString());
+        minCpu = std::stod(args["-mc"].asString());
+        minMem = std::stoull(args["-mm"].asString()) * 1024 * 1024;
+        minDisk = std::stoull(args["-md"].asString()) * 1024;
+    } catch (...) {
+        spdlog::error("参数解析错误");
+        return 1;
+    }
+
     // 注册信号处理
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
@@ -52,9 +85,9 @@ int main() {
         
         logger.info("{}, {}, {}", cpuUsage, memUsage, diskIo);
 
-        std::vector<std::string> topCPUs = monitor.getTopCpuProcesses(3);
-        std::vector<std::string> topMemories = monitor.getTopMemProcesses(3);
-        std::vector<std::string> topDiskIos = monitor.getTopDiskProcesses(3);
+        auto topCPUs = monitor.getTopCpuProcesses(3, minCpu);
+        auto topMemories = monitor.getTopMemProcesses(3, minMem);
+        auto topDiskIos = monitor.getTopDiskProcesses(3, minDisk);
         
         for(const auto& process : topCPUs) {
             logger.info("{}", process);
@@ -70,8 +103,7 @@ int main() {
 
         // 可中断的睡眠
         std::unique_lock<std::mutex> lock(g_mutex);
-        g_cv.wait_for(lock, std::chrono::seconds(10), []{ return g_stopping.load(); });
-        //std::this_thread::sleep_for(std::chrono::seconds(10));
+        g_cv.wait_for(lock, std::chrono::seconds(interval), []{return g_stopping.load();});
     }
 
     logger.info("Stopping...");

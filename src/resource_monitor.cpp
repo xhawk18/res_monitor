@@ -111,7 +111,7 @@ std::string ResourceMonitor::getCpuUsage() {
 
 std::string ResourceMonitor::getMemoryUsage() {
     std::ifstream proc_meminfo("/proc/meminfo");
-    if (!proc_meminfo) return "Mem: ?";
+    if (!proc_meminfo) return "MEM: ?";
 
     uint64_t total = 0, free = 0, buffers = 0, cached = 0;
     uint64_t swapTotal = 0, swapFree = 0;
@@ -147,13 +147,13 @@ std::string ResourceMonitor::getMemoryUsage() {
         }
     }
 
-    if (total == 0) return "Mem: ?";
+    if (total == 0) return "MEM: ?";
     
     // 计算物理内存使用率
     uint64_t used = total - free - buffers - cached;
     double memoryUsage = 100.0 * used / total;
 
-    std::string memoryUsageString = fmt::format("Mem: {:.2f}% ({} of {})",
+    std::string memoryUsageString = fmt::format("MEM: {:.2f}% ({} of {})",
         memoryUsage,
         valueToHumanReadable(used),
         valueToHumanReadable(total));
@@ -162,7 +162,7 @@ std::string ResourceMonitor::getMemoryUsage() {
     if (swapTotal > 0) {
         uint64_t swapUsed = swapTotal - swapFree;
         double swapUsage = 100.0 * swapUsed / swapTotal;
-        return fmt::format("{}, Swap: {:.2f}% ({} of {})",
+        return fmt::format("{}, SWAP: {:.2f}% ({} of {})",
             memoryUsageString,
             swapUsage,
             valueToHumanReadable(swapUsed),
@@ -175,7 +175,7 @@ std::string ResourceMonitor::getMemoryUsage() {
 
 std::string ResourceMonitor::getDiskIo() {
     std::ifstream proc_diskstats("/proc/diskstats");
-    if (!proc_diskstats) return "Disk: ?";
+    if (!proc_diskstats) return "DISK: ?";
 
     std::string line;
     std::map<std::string, uint64_t> diskIoTime;
@@ -209,7 +209,7 @@ std::string ResourceMonitor::getDiskIo() {
     });
 
     if(!impl_->diskIoUpdateTime_.has_value()) {
-        return "Disk: ?";
+        return "DISK: ?";
     }
 
     // 计算磁盘繁忙百分比
@@ -463,7 +463,7 @@ std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses, 
 
         auto cmdline = getCmdLine(pid);
         
-        topDiskIos.emplace_back(fmt::format("IO: {}+{}, CMD: [{}]{}",
+        topDiskIos.emplace_back(fmt::format("DISK: {}+{}, CMD: [{}]{}",
             valueToHumanReadable(deltaReadBytes),
             valueToHumanReadable(deltaWriteBytes),
             pid,
