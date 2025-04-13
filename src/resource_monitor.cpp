@@ -370,7 +370,7 @@ std::vector<std::string> ResourceMonitor::getTopMemProcesses(int numProcesses, u
         if(memorySize < minMemUsage) continue;
 
         topMemories.emplace_back(fmt::format("MEM: {}, CMD: [{}]{}", 
-            pid, valueToHumanReadable(memorySize), pid, cmdline));
+            valueToHumanReadable(memorySize), pid, cmdline));
     }
 
     return topMemories;

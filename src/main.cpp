@@ -57,15 +57,15 @@ int main() {
         std::vector<std::string> topDiskIos = monitor.getTopDiskProcesses(3);
         
         for(const auto& process : topCPUs) {
-            logger.info("Top CPU: {}", process);
+            logger.info("{}", process);
         }
 
         for(const auto& process : topMemories) {
-            logger.info("Top MEM: {}", process);
+            logger.info("{}", process);
         }
 
         for(const auto& process : topDiskIos) {
-            logger.info("Top Disk: {}", process);
+            logger.info("{}", process);
         }
 
         // 可中断的睡眠
