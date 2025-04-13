@@ -12,12 +12,9 @@ public:
     std::string getMemoryUsage();
     std::string getDiskIo();
     
-    void getTopProcesses(
-        int numProcesses,
-        std::vector<std::string> &topCPUs,
-        std::vector<std::string> &topMemories,
-        std::vector<std::string> &topDiskIos    
-    );
+    std::vector<std::string> getTopCpuProcesses(int numProcesses);
+    std::vector<std::string> getTopMemProcesses(int numProcesses);
+    std::vector<std::string> getTopDiskProcesses(int numProcesses);
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

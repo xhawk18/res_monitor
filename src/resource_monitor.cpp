@@ -34,6 +34,15 @@ std::string valueToHumanReadable(uint64_t value) {
     }
 }
 
+std::string getCmdLine(int pid) {
+    std::string cmdlinePath = fmt::format("/proc/{}/cmdline", pid);
+    std::ifstream cmdlineFile(cmdlinePath);
+    if (!cmdlineFile.is_open()) return "";
+    std::string cmdline;
+    std::getline(cmdlineFile, cmdline, '\0');
+    return cmdline;
+}
+
 struct ResourceMonitor::Impl {
     // CPU
     std::optional<uint64_t> prevTotal_;
@@ -215,12 +224,8 @@ std::string ResourceMonitor::getDiskIo() {
     return result;
 }
 
-void ResourceMonitor::getTopProcesses(
-    int numProcesses,
-    std::vector<std::string> &topCPUs,
-    std::vector<std::string> &topMemories,
-    std::vector<std::string> &topDiskIos
-) {
+std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses) {
+    std::vector<std::string> topCPUs;
     auto readCPUTotal = []() -> uint64_t {
         std::ifstream file("/proc/stat");
         if (!file.is_open()) return 0;
@@ -239,7 +244,6 @@ void ResourceMonitor::getTopProcesses(
     
         return sum;
     };
-
 
     std::map<int, Impl::Process> processes;
 
@@ -290,7 +294,7 @@ void ResourceMonitor::getTopProcesses(
     });
 
     if(!impl_->prevCpuTime_.has_value()) {
-        return;
+        return topCPUs;
     }
 
     // 计算CPU使用率
@@ -304,15 +308,6 @@ void ResourceMonitor::getTopProcesses(
         }
     }
 
-    auto getCmdLine = [](int pid) -> std::string {
-        std::string cmdlinePath = fmt::format("/proc/{}/cmdline", pid);
-        std::ifstream cmdlineFile(cmdlinePath);
-        if (!cmdlineFile.is_open()) return "";
-        std::string cmdline;
-        std::getline(cmdlineFile, cmdline, '\0');
-        return cmdline;
-    };
-
     // 排序并获取前numProcesses个进程
     auto deltaCpuTime = cpuTime - impl_->prevCpuTime_.value();
     int n = 0;
@@ -322,6 +317,13 @@ void ResourceMonitor::getTopProcesses(
         auto cmdline = getCmdLine(pid);
         topCPUs.emplace_back(fmt::format("PID: {}, CPU: {:.2f}%, CMD: {}", pid, cpuUsage, cmdline));
     }
+
+    return topCPUs;
+}
+
+
+std::vector<std::string> ResourceMonitor::getTopMemProcesses(int numProcesses) {
+    std::vector<std::string> topMemories;
 
     // 添加内存统计
     std::map<uint64_t, int> memoryMap;  // key: 内存大小(字节), value: pid
@@ -348,7 +350,7 @@ void ResourceMonitor::getTopProcesses(
     }
 
     // 获取内存占用最高的进程  
-    n = 0;
+    int n = 0;
     for (auto it = memoryMap.rbegin(); it != memoryMap.rend() && n < numProcesses; ++it, ++n) {
         auto pid = it->second;
         auto cmdline = getCmdLine(pid);
@@ -357,4 +359,55 @@ void ResourceMonitor::getTopProcesses(
             pid, valueToHumanReadable(memorySize), cmdline));
     }
 
+    return topMemories;
+}
+
+std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses) {
+    //std::vector<std::string> &topMemories,
+    std::vector<std::string> topDiskIos;
+
+    // 添加磁盘IO统计
+    std::map<uint64_t, int> ioMap;  // key: IO读写总量(字节), value: pid
+    for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
+        try {
+            std::string pidStr = entry.path().filename();
+            if (std::all_of(pidStr.begin(), pidStr.end(), ::isdigit)) {
+                int pid = std::stoi(pidStr);
+                
+                // 读取/proc/[pid]/io获取IO信息
+                std::ifstream ioFile(entry.path() / "io");
+                if (ioFile) {
+                    uint64_t readBytes = 0, writeBytes = 0;
+                    std::string line;
+                    
+                    while (std::getline(ioFile, line)) {
+                        if (line.find("read_bytes:") == 0) {
+                            readBytes = std::stoull(line.substr(11));
+                        } else if (line.find("write_bytes:") == 0) {
+                            writeBytes = std::stoull(line.substr(12));
+                        }
+                    }
+                    
+                    uint64_t totalIO = readBytes + writeBytes;
+                    if (totalIO > 0) {
+                        ioMap.emplace(totalIO, pid);
+                    }
+                }
+            }
+        } catch (...) {
+            continue;
+        }
+    }
+
+    // 获取磁盘IO最高的进程
+    int n = 0;
+    for (auto it = ioMap.rbegin(); it != ioMap.rend() && n < numProcesses; ++it, ++n) {
+        auto pid = it->second;
+        auto cmdline = getCmdLine(pid);
+        auto ioSize = it->first;
+        topDiskIos.emplace_back(fmt::format("PID: {}, IO: {}, CMD: {}",
+            pid, valueToHumanReadable(ioSize), cmdline));
+    }
+
+    return topDiskIos;
 }

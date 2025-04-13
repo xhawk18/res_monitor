@@ -21,19 +21,21 @@ int main() {
         
         logger.info("{}, {}, {}", cpuUsage, memUsage, diskIo);
 
-        std::vector<std::string> topCPUs;
-        std::vector<std::string> topMemories;
-        std::vector<std::string> topDiskIos;
-        monitor.getTopProcesses(3, topCPUs, topMemories, topDiskIos);
+        std::vector<std::string> topCPUs = monitor.getTopCpuProcesses(3);
+        std::vector<std::string> topMemories = monitor.getTopMemProcesses(3);
+        std::vector<std::string> topDiskIos = monitor.getTopDiskProcesses(3);
         
         for(const auto& process : topCPUs) {
-            logger.info("Top CPU Process: {}", process);
+            logger.info("Top CPU: {}", process);
         }
 
         for(const auto& process : topMemories) {
-            logger.info("Top MEM Process: {}", process);
+            logger.info("Top MEM: {}", process);
         }
-        
+
+        for(const auto& process : topDiskIos) {
+            logger.info("Top Disk: {}", process);
+        }
         std::this_thread::sleep_for(std::chrono::seconds(3));
     }
 
