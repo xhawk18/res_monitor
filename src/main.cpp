@@ -71,8 +71,9 @@ int main(int argc, char** argv) {
         10  // 保留10个文件
     );
     
-    spdlog::logger logger("multi_sink", {console_sink, rotating_sink});
-    logger.set_level(spdlog::level::info);
+    auto logger = std::make_shared<spdlog::logger>(spdlog::logger{"multi_sink", {console_sink, rotating_sink}});
+    spdlog::set_default_logger(logger);
+    logger->set_level(spdlog::level::info);
     //logger.set_pattern("[%Y-%m-%d %T.%f] [%L] [%t] [%s:%#:%!] %^%v%#$");
 
     // 解析命令行参数 
@@ -146,7 +147,7 @@ int main(int argc, char** argv) {
     }
 
     SPDLOG_INFO("Stopping...");
-    logger.flush();
+    logger->flush();
     spdlog::shutdown();
     return 0;
 }

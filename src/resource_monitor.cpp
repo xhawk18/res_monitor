@@ -268,7 +268,7 @@ std::string ResourceMonitor::getTemperature() {
     if(!result.empty())
         return result;
 
-    return "N/A";
+    return "N/A °C";
 }
 
 
