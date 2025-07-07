@@ -121,7 +121,8 @@ int main(int argc, char** argv) {
         auto diskIo = monitor.getDiskIo();
         auto temperature = monitor.getTemperature();
         
-        SPDLOG_INFO("{}, {}, {}, {}", cpuUsage, memUsage, diskIo, temperature);
+        SPDLOG_INFO("{}, {}, {}", cpuUsage, memUsage, diskIo);
+        SPDLOG_INFO("\n{}", temperature);
 
         auto topCPUs = monitor.getTopCpuProcesses(numProcesses, minCpu/100.0);
         auto topMemories = monitor.getTopMemProcesses(numProcesses, minMem*1024*1024);

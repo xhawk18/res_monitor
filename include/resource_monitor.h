@@ -12,6 +12,7 @@ public:
     std::string getMemoryUsage();
     std::string getDiskIo();
     std::string getTemperature();
+    std::string getTemperatureSimple();
     
     std::vector<std::string> getTopCpuProcesses(int numProcesses, double minCpuUsage = 0.01);
     std::vector<std::string> getTopMemProcesses(int numProcesses, uint64_t minMemUsage = 1024*1024);

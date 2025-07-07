@@ -9,6 +9,12 @@
 #include <istream>
 #include <iterator>
 #include <filesystem>
+#include <iomanip>
+#include <regex>
+#include <optional>
+#include <string>
+#include <iostream>
+
 namespace fs = std::filesystem;
 
 struct OnScopeExit {
@@ -236,7 +242,94 @@ std::string ResourceMonitor::getDiskIo() {
     return result;
 }
 
+/// 格式示例：
+/// coretemp
+/// Adapter: ISA adapter
+/// Package id 0:  +46.0°C  (high = +80.0°C, crit = +100.0°C)
+/// Core 0:        +44.0°C  (high = +80.0°C, crit = +100.0°C)
 std::string ResourceMonitor::getTemperature() {
+    std::ostringstream out;
+    std::regex tempRE(R"(temp(\d+)_input)");
+
+    for (const auto& hw : fs::directory_iterator("/sys/class/hwmon"))
+    {
+        if (!fs::is_directory(hw)) continue;
+
+        /* ---------- 1. 芯片名称 ---------- */
+        std::string chip;
+        {
+            std::ifstream fin(hw.path() / "name");
+            std::getline(fin, chip);
+        }
+        if (chip.empty()) chip = hw.path().filename();
+
+        out << chip << '\n';
+
+        /* ---------- 2. Adapter ---------- */
+        // 粗略判断：有 'device' 子目录 → PCI/Platform/USB 适配器；否则 ISA
+        out << "Adapter: " << (fs::exists(hw.path() / "device") ? "PCI adapter" : "ISA adapter") << '\n';
+
+        /* ---------- 3. 每个 tempN ---------- */
+        // 为了让列对齐，先收集一轮求最长 label 长度
+        struct Row { std::string label; double val; std::optional<double> max, crit; };
+        std::vector<Row> rows;
+        std::size_t maxLabelLen = 0;
+
+        for (const auto& f : fs::directory_iterator(hw))
+        {
+            std::smatch m;
+            auto str = f.path().filename().string();
+            if (!std::regex_match(str, m, tempRE)) continue;
+            const std::string N = m[1];
+
+            long milli = 0;
+            { std::ifstream fin(f.path()); fin >> milli; }
+            if (!milli) continue;                      // 无效
+
+            std::string label;
+            { std::ifstream fin(hw.path() / ("temp"+N+"_label")); std::getline(fin,label); }
+            if (label.empty()) label = "temp" + N;
+
+            auto readField = [&](const std::string& fname)->std::optional<double>{
+                std::ifstream fin(hw.path()/fname);
+                long v; if (fin && (fin>>v)) return v/1000.0; return std::nullopt;
+            };
+
+            Row row{label,
+                    milli / 1000.0,
+                    readField("temp"+N+"_max"),
+                    readField("temp"+N+"_crit")};
+            maxLabelLen = std::max(maxLabelLen, row.label.size());
+            rows.emplace_back(std::move(row));
+        }
+
+        /* ---------- 4. 打印 ---------- */
+        for (const auto& r : rows)
+        {
+            out << std::left << std::setw(maxLabelLen+2) << r.label << ":  "
+                << std::right << std::showpos << std::fixed << std::setprecision(1)
+                << std::setw(6) << r.val << "°C" << std::noshowpos;
+
+            if (r.max || r.crit)
+            {
+                out << "  (";
+                bool first = true;
+                if (r.max)  { out << "high = " << std::showpos << *r.max << "°C"; first = false; }
+                if (r.crit) { out << (first?"":" ,") << "crit = " << std::showpos << *r.crit << "°C"; }
+                out << ")";
+            }
+            out << '\n';
+        }
+        out << '\n';                // 空行分隔芯片
+    }
+
+    std::string result = out.str();
+    if (result.empty()) result = "No temperature sensors found\n";
+    return result;
+}
+
+
+std::string ResourceMonitor::getTemperatureSimple() {
     std::ostringstream oss;
     constexpr char kThermalDir[] = "/sys/class/thermal";
 
