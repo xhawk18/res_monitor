@@ -4,7 +4,7 @@ project(res_monitor)
 set(CMAKE_CXX_STANDARD 20)
 
 # 设置静态编译选项
-set(CMAKE_EXE_LINKER_FLAGS "-static")
+#set(CMAKE_EXE_LINKER_FLAGS "-static")
 set(BUILD_SHARED_LIBS OFF)
 
 # 使用本地spdlog代替系统查找

@@ -15,13 +15,21 @@
 
 namespace fs = std::filesystem;
 
-std::atomic<bool> g_stopping{false};
-std::mutex g_mutex;
-std::condition_variable g_cv;
+struct Global {
+    std::atomic<bool> stopping_{false};
+    std::mutex mutex_;
+    std::condition_variable cv_;
+};
+
+Global &getGlobal() {
+    static Global s_global;
+    return s_global;
+}
 
 void signalHandler(int signum) {
-    g_stopping = true;
-    g_cv.notify_all();  // 唤醒所有等待的线程
+    auto &global = getGlobal();
+    global.stopping_ = true;
+    global.cv_.notify_all();  // 唤醒所有等待的线程
 }
 
 static const char USAGE[] =
@@ -39,6 +47,8 @@ Options:
   -n <num_processes>  显示进程数 [默认: 3]
   -h --help           显示帮助信息
 )";
+
+//#define PTI do {SPDLOG_INFO("");} while(0)
 
 int main(int argc, char** argv) {
     // 注册信号处理
@@ -63,6 +73,7 @@ int main(int argc, char** argv) {
     
     spdlog::logger logger("multi_sink", {console_sink, rotating_sink});
     logger.set_level(spdlog::level::info);
+    //logger.set_pattern("[%Y-%m-%d %T.%f] [%L] [%t] [%s:%#:%!] %^%v%#$");
 
     // 解析命令行参数 
     auto args = docopt::docopt(USAGE, {argv + 1, argv + argc}, true);
@@ -90,11 +101,11 @@ int main(int argc, char** argv) {
         getArg("-d", &minDisk);
         getArg("-n", &numProcesses);
     } catch (const std::exception& e) {
-        logger.error("参数解析错误: {}", e.what());
+        SPDLOG_ERROR("参数解析错误: {}", e.what());
         return 1;
     }
 
-    logger.info("interval: {}sec, minCpu: {}%, minMem: {}M, minDisk: {}k, numProcesses: {}",
+    SPDLOG_INFO("interval: {}sec, minCpu: {}%, minMem: {}M, minDisk: {}k, numProcesses: {}",
         interval,
         minCpu,
         minMem,
@@ -102,35 +113,39 @@ int main(int argc, char** argv) {
         numProcesses);
 
     ResourceMonitor monitor;
-    while(!g_stopping) {
+    auto &global = getGlobal();
+    while(!global.stopping_) {
         auto cpuUsage = monitor.getCpuUsage();
         auto memUsage = monitor.getMemoryUsage();
         auto diskIo = monitor.getDiskIo();
+        auto temperature = monitor.getTemperature();
         
-        logger.info("{}, {}, {}", cpuUsage, memUsage, diskIo);
+        SPDLOG_INFO("{}, {}, {}, {}", cpuUsage, memUsage, diskIo, temperature);
 
         auto topCPUs = monitor.getTopCpuProcesses(numProcesses, minCpu/100.0);
         auto topMemories = monitor.getTopMemProcesses(numProcesses, minMem*1024*1024);
         auto topDiskIos = monitor.getTopDiskProcesses(numProcesses, minDisk*1024);
         
         for(const auto& process : topCPUs) {
-            logger.info("{}", process);
+            SPDLOG_INFO("{}", process);
         }
 
         for(const auto& process : topMemories) {
-            logger.info("{}", process);
+            SPDLOG_INFO("{}", process);
         }
 
         for(const auto& process : topDiskIos) {
-            logger.info("{}", process);
+            SPDLOG_INFO("{}", process);
         }
 
         // 可中断的睡眠
-        std::unique_lock<std::mutex> lock(g_mutex);
-        g_cv.wait_for(lock, std::chrono::seconds(interval), []{return g_stopping.load();});
+        std::unique_lock<std::mutex> lock(global.mutex_);
+        global.cv_.wait_for(lock, std::chrono::seconds(interval), [&global]{
+            return global.stopping_.load();
+        });
     }
 
-    logger.info("Stopping...");
+    SPDLOG_INFO("Stopping...");
     logger.flush();
     spdlog::shutdown();
     return 0;

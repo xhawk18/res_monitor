@@ -9,6 +9,7 @@
 #include <istream>
 #include <iterator>
 #include <filesystem>
+namespace fs = std::filesystem;
 
 struct OnScopeExit {
     std::function<void()> func_;
@@ -16,7 +17,8 @@ struct OnScopeExit {
     ~OnScopeExit() { func_(); }
 };
 
-std::string valueToHumanReadable(auto value) {
+template<typename T>
+std::string valueToHumanReadable(T value) {
     if (value >= (uint64_t)1024 * 1024 * 1024 * 1024) {
         return fmt::format("{:.2f} TB", value / 1024.0 / 1024.0 / 1024.0 / 1024.0);
     }
@@ -234,6 +236,42 @@ std::string ResourceMonitor::getDiskIo() {
     return result;
 }
 
+std::string ResourceMonitor::getTemperature() {
+    std::ostringstream oss;
+    constexpr char kThermalDir[] = "/sys/class/thermal";
+
+    try {
+        bool isFirst = true;
+        for (const auto& entry : fs::directory_iterator(kThermalDir))
+        {
+            if (!entry.is_directory()) continue;
+            const auto &zonePath = entry.path();
+
+            std::ifstream typeFile(zonePath / "type");
+            std::string type;
+            if (!typeFile || !(typeFile >> type)) continue;
+
+            std::ifstream tempFile(zonePath / "temp");
+            
+            long milli;               // 内核导出的值一般是 “毫摄氏度”
+            if (!tempFile || !(tempFile >> milli)) continue;
+
+            double celsius = milli / 1000.0;
+
+            if(!isFirst) oss << " ,";
+            isFirst = false;
+            oss << type << ":" << std::fixed << std::setprecision(1) << celsius << " °C";
+        }
+    } catch(const std::exception &) { }
+
+    auto result = oss.str();
+    if(!result.empty())
+        return result;
+
+    return "N/A";
+}
+
+
 std::vector<std::string> ResourceMonitor::getTopCpuProcesses(int numProcesses, double minCpuUsage) {
     std::vector<std::string> topCPUs;
     auto readCPUTotal = []() -> uint64_t {
@@ -340,7 +378,7 @@ std::vector<std::string> ResourceMonitor::getTopMemProcesses(int numProcesses, u
 
     // 添加内存统计
     std::multimap<uint64_t, int> memoryMap;  // key: 内存大小(字节), value: pid
-    for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
+    for (const auto& entry : fs::directory_iterator("/proc")) {
         try {
             std::string pidStr = entry.path().filename();
             if (std::all_of(pidStr.begin(), pidStr.end(), ::isdigit)) {
@@ -384,7 +422,7 @@ std::vector<std::string> ResourceMonitor::getTopDiskProcesses(int numProcesses, 
     // 添加磁盘IO统计  
     auto now = std::chrono::steady_clock::now();
     std::map<int, Impl::ProcessIo> processIos;
-    for (const auto& entry : std::filesystem::directory_iterator("/proc")) {
+    for (const auto& entry : fs::directory_iterator("/proc")) {
         try {
             std::string pidStr = entry.path().filename();
             if (std::all_of(pidStr.begin(), pidStr.end(), ::isdigit)) {
